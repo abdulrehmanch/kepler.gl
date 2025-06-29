@@ -71,6 +71,8 @@ import sampleAnimateTrip, {
 import sampleIconCsv from './data/sample-icon-csv';
 import sampleGpsData from './data/sample-gps-data';
 import sampleRowData, {config as rowDataConfig} from './data/sample-row-data';
+import dynamicGeojsonData from './data/dynamic-geojson-data';
+import dynamicGeojsonConfig from './data/dynamic-geojson-config';
 import {processCsvData, processGeojson, processRowObject} from '@kepler.gl/processors';
 
 /* eslint-enable no-unused-vars */
@@ -128,6 +130,21 @@ const CONTAINER_STYLE = {
   display: 'flex',
   flexDirection: 'column',
   backgroundColor: '#333'
+};
+
+const BUTTON_STYLE = {
+  position: 'absolute',
+  zIndex: 10,
+  top: '10px',
+  right: '10px',
+  padding: '10px 15px',
+  backgroundColor: '#29323C',
+  color: 'white',
+  border: '1px solid #555',
+  borderRadius: '4px',
+  cursor: 'pointer',
+  fontSize: '12px',
+  fontWeight: 'bold'
 };
 
 const StyledResizeHandle = styled(PanelResizeHandle)`
@@ -598,8 +615,28 @@ const App = props => {
     );
   }, [dispatch]);
 
+  const _loadDynamicGeojsonData = useCallback(() => {
+    dispatch(
+      addDataToMap({
+        datasets: [
+          {
+            info: {
+              label: 'Famous Parks',
+              id: 'dynamic-parks-data'
+            },
+            data: processGeojson(dynamicGeojsonData)
+          }
+        ],
+        config: dynamicGeojsonConfig,
+        options: {
+          centerMap: true
+        }
+      })
+    );
+  }, [dispatch]);
+
   const _loadSampleData = useCallback(() => {
-    // _loadPointData();
+    _loadPointData();
     // _loadGeojsonData();
     // _loadTripGeoJson();
     // _loadIconData();
@@ -625,7 +662,8 @@ const App = props => {
     _replaceData,
     _loadVectorTileData,
     _loadSyncedFilterWTripLayer,
-    _replaceSyncedFilterWTripLayer
+    _replaceSyncedFilterWTripLayer,
+    _loadDynamicGeojsonData
   ]);
 
   return (
@@ -649,6 +687,12 @@ const App = props => {
               <Announcement onDisable={_disableBanner} />
             </Banner>
             <div style={CONTAINER_STYLE}>
+              <button
+                style={BUTTON_STYLE}
+                onClick={_loadDynamicGeojsonData}
+              >
+                Load Parks Data
+              </button>
               <PanelGroup direction="horizontal">
                 <Panel defaultSize={isAiAssistantPanelOpen ? 70 : 100}>
                   <PanelGroup direction="vertical">
