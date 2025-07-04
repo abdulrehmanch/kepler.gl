@@ -2,6 +2,6 @@ services:
   web:
     build: .
     ports:
-      - "8080:80"
+      - "8090:80"
     volumes:
       - ./examples/demo-app/dist:/usr/share/nginx/html:ro
