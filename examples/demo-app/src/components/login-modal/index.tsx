@@ -55,6 +55,7 @@ const formContainerStyle = {
   marginTop: '20px'
 };
 
+const baseUrl = 'https://gridmaps.geosoftsolution.com'; // Replace with your actual base URL
 // Real API login endpoint function
 const loginEndpoint = async (
   username: string,
@@ -65,7 +66,7 @@ const loginEndpoint = async (
   token?: string;
 }> => {
   try {
-    const response = await fetch('http://127.0.0.1:8000/be/api-token-auth/', {
+    const response = await fetch(`${baseUrl}/be/api-token-auth/`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -114,7 +115,7 @@ const LoginModal = () => {
   // Function to fetch user layers
   const fetchUserLayers = async (token: string) => {
     try {
-      const response = await fetch('http://127.0.0.1:8000/be/api/user-layers/', {
+      const response = await fetch(`${baseUrl}/be/api/user-layers/`, {
         method: 'GET',
         headers: {
           Authorization: `Token ${token}`,
@@ -246,7 +247,7 @@ const LoginModal = () => {
               {selectedLayer && (
                 <button
                   onClick={async () => {
-                    const layerUrl = `http://127.0.0.1:8000/be/serve-layer/?layer_name=${selectedLayer}`;
+                    const layerUrl = `${baseUrl}/be/serve-layer/?layer_name=${selectedLayer}`;
 
                     try {
                       // First, check if the layer data is already in localStorage
