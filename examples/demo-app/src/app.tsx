@@ -46,6 +46,7 @@ import {
 } from '@kepler.gl/actions';
 import {CLOUD_PROVIDERS} from './cloud-providers';
 import {Panel, PanelGroup, PanelResizeHandle} from 'react-resizable-panels';
+import LoginModal, {LOGIN_MODAL_ID, smallModalCss} from './components/login-modal';
 
 const KeplerGl = require('@kepler.gl/components').injectComponents([
   replaceLoadDataModal(),
@@ -73,7 +74,12 @@ import sampleGpsData from './data/sample-gps-data';
 import sampleRowData, {config as rowDataConfig} from './data/sample-row-data';
 import dynamicGeojsonData from './data/dynamic-geojson-data';
 import dynamicGeojsonConfig from './data/dynamic-geojson-config';
-import {processCsvData, processGeojson, processRowObject} from '@kepler.gl/processors';
+import {
+  processCsvData,
+  processGeojson,
+  processRowObject
+  // processArrowTable
+} from '@kepler.gl/processors';
 
 /* eslint-enable no-unused-vars */
 
@@ -147,11 +153,28 @@ const BUTTON_STYLE = {
   fontWeight: 'bold'
 };
 
+const LOGIN_BUTTON_STYLE = {
+  position: 'absolute',
+  zIndex: 10,
+  bottom: '10px',
+  right: '10px',
+  padding: '10px 15px',
+  backgroundColor: '#0F9668',
+  color: 'white',
+  border: '1px solid #555',
+  borderRadius: '4px',
+  cursor: 'pointer',
+  fontSize: '12px',
+  fontWeight: 'bold'
+};
+
 const StyledResizeHandle = styled(PanelResizeHandle)`
   background-color: ${panelBorderColor};
+
   &:hover {
     background-color: #555;
   }
+
   width: 100%;
   height: 5px;
   cursor: row-resize;
@@ -635,6 +658,19 @@ const App = props => {
     );
   }, [dispatch]);
 
+  const _openLoginModal = useCallback(() => {
+    dispatch(
+      toggleModal({
+        id: LOGIN_MODAL_ID,
+        template: LoginModal,
+        modalProps: {
+          title: 'Login',
+          cssStyle: smallModalCss
+        }
+      })
+    );
+  }, [dispatch]);
+
   const _loadSampleData = useCallback(() => {
     _loadPointData();
     // _loadGeojsonData();
@@ -687,11 +723,8 @@ const App = props => {
               <Announcement onDisable={_disableBanner} />
             </Banner>
             <div style={CONTAINER_STYLE}>
-              <button
-                style={BUTTON_STYLE}
-                onClick={_loadDynamicGeojsonData}
-              >
-                Load Parks Data
+              <button style={LOGIN_BUTTON_STYLE} onClick={_openLoginModal}>
+                User View
               </button>
               <PanelGroup direction="horizontal">
                 <Panel defaultSize={isAiAssistantPanelOpen ? 70 : 100}>

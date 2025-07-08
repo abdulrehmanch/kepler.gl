@@ -190,6 +190,7 @@ export async function readFileInBatches({
   loaders: Loader[];
   loadOptions: any;
 }): Promise<AsyncGenerator> {
+  console.log('Reading file in batches:', file.name, file.type);
   loaders = [JSONLoader, CSVLoader, GeoArrowLoader, ParquetWasmLoader, ...loaders];
   loadOptions = {
     csv: CSV_LOADER_OPTIONS,
