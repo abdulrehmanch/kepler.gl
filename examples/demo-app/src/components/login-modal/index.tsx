@@ -55,8 +55,8 @@ const formContainerStyle = {
   marginTop: '20px'
 };
 
-// const baseUrl = 'http://localhost:8000'; // Replace with your actual base URL
-const baseUrl = 'https://gridmaps.geosoftsolution.com';
+const baseUrl = 'http://localhost:8000'; // Replace with your actual base URL
+// const baseUrl = 'https://gridmaps.geosoftsolution.com';
 // Real API login endpoint function
 const loginEndpoint = async (
   username: string,
@@ -109,7 +109,7 @@ const LoginModal = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userLayers, setUserLayers] = useState<Array<{
     id: number;
-    layers: {layer_name: string}[];
+    allowed_layers: {layer_name: string}[];
   }> | null>(null);
   const [selectedLayer, setSelectedLayer] = useState<string | null>(null);
 
@@ -204,8 +204,8 @@ const LoginModal = () => {
           {/* Display user layers if available */}
           {userLayers &&
           userLayers[0] &&
-          userLayers[0].layers &&
-          userLayers[0].layers.length > 0 ? (
+          userLayers[0].allowed_layers &&
+          userLayers[0].allowed_layers.length > 0 ? (
             <div style={{marginBottom: '20px', textAlign: 'left'}}>
               <h4 style={{marginBottom: '10px'}}>Your Layers:</h4>
               <ul
@@ -218,13 +218,13 @@ const LoginModal = () => {
                   overflowY: 'auto'
                 }}
               >
-                {userLayers[0].layers.map((layer, index) => (
+                {userLayers[0].allowed_layers.map((layer, index) => (
                   <li
                     key={index}
                     style={{
                       padding: '5px 0',
                       borderBottom:
-                        index < userLayers[0].layers.length - 1 ? '1px solid #eee' : 'none',
+                        index < userLayers[0].allowed_layers.length - 1 ? '1px solid #eee' : 'none',
                       display: 'flex',
                       justifyContent: 'space-between',
                       alignItems: 'center'
@@ -268,6 +268,7 @@ const LoginModal = () => {
                         const token = localStorage.getItem('authToken');
 
                         // Fetch the GeoJSON data from the URL with auth token
+                        // todo: add loader here to show loading resources
                         const response = await fetch(layerUrl, {
                           headers: {
                             Authorization: `Token ${token}`,
