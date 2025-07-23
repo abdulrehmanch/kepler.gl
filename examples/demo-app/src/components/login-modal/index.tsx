@@ -3,9 +3,10 @@
 
 import React, {useState} from 'react';
 import {css} from 'styled-components';
-import {toggleModal, addDataToMap} from '@kepler.gl/actions';
+import {toggleModal, addDataToMap, loadFiles} from '@kepler.gl/actions';
 import {useDispatch} from 'react-redux';
-import {processGeojson} from '@kepler.gl/processors';
+import {filesToDataPayload} from '@kepler.gl/processors';
+// We no longer need to import processGeojson as we'll use the default file handlers
 
 // Define a custom modal ID for the login modal
 export const LOGIN_MODAL_ID = 'loginModal';
@@ -251,70 +252,58 @@ const LoginModal = () => {
                     const layerUrl = `${baseUrl}/be/serve-layer/?layer_name=${selectedLayer}`;
 
                     try {
-                      // First, check if the layer data is already in localStorage
-                      const cachedData = localStorage.getItem(`geojson-${selectedLayer}`);
+                      // Fetch from API
+                      console.log(`Fetching GeoJSON data from: ${layerUrl}`);
 
-                      let geojsonData;
+                      // Get the auth token from localStorage
+                      const token = localStorage.getItem('authToken');
 
-                      if (cachedData) {
-                        // Use cached data if available
-                        console.log(`Using cached data for layer: ${selectedLayer}`);
-                        geojsonData = JSON.parse(cachedData);
-                      } else {
-                        // Fetch from API if not cached
-                        console.log(`Fetching GeoJSON data from: ${layerUrl}`);
-
-                        // Get the auth token from localStorage
-                        const token = localStorage.getItem('authToken');
-
-                        // Fetch the GeoJSON data from the URL with auth token
-                        // todo: add loader here to show loading resources
-                        const response = await fetch(layerUrl, {
-                          headers: {
-                            Authorization: `Token ${token}`,
-                            'Content-Type': 'application/json'
-                          }
-                        });
-
-                        if (!response.ok) {
-                          throw new Error(`Failed to fetch GeoJSON: ${response.statusText}`);
+                      const response = await fetch(layerUrl, {
+                        headers: {
+                          Authorization: `Token ${token}`,
+                          'Content-Type': 'application/json'
                         }
+                      });
 
-                        // Parse the response as JSON
-                        geojsonData = await response.json();
-
-                        // Store the GeoJSON data in localStorage for future use
-                        localStorage.setItem(
-                          `geojson-${selectedLayer}`,
-                          JSON.stringify(geojsonData)
-                        );
-                        console.log(`Cached data for layer: ${selectedLayer}`);
+                      if (!response.ok) {
+                        throw new Error(`Failed to fetch GeoJSON: ${response.statusText}`);
                       }
 
-                      // Process the GeoJSON data
-                      const processedData = processGeojson(geojsonData);
-                      console.log('Processed data:', processedData);
+                      const geojsonData = await response.json();
 
-                      // Add the data to the map
+                      // Convert the GeoJSON data to a File object
+                      const blob = new Blob([JSON.stringify(geojsonData)], {
+                        type: 'application/json'
+                      });
+
+                      // Create a File object from the Blob
+                      const file = new File([blob], `${selectedLayer}.geojson`, {
+                        type: 'application/json'
+                      });
+
+                      // Use the default file handlers to process the file
                       dispatch(
-                        addDataToMap({
-                          datasets: [
-                            {
-                              info: {
-                                label: selectedLayer,
-                                id: `layer-${selectedLayer}`
-                              },
-                              data: processedData
-                            }
-                          ],
-                          options: {
-                            centerMap: true
-                          }
+                        loadFiles([file], fileCache => {
+                          // Convert file cache to data payloads
+                          const payloads = filesToDataPayload(fileCache);
+
+                          // Add data to map with centerMap option
+                          payloads.forEach(payload => {
+                            dispatch(
+                              addDataToMap({
+                                ...payload,
+                                options: {
+                                  ...payload.options,
+                                  centerMap: true
+                                }
+                              })
+                            );
+                          });
+
+                          // Return the action object directly instead of dispatching it
+                          return toggleModal(null);
                         })
                       );
-
-                      // Close the modal after adding to map
-                      dispatch(toggleModal(null));
                     } catch (error) {
                       console.error('Error adding layer to map:', error);
                       // @ts-ignore

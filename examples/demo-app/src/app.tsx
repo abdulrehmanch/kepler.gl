@@ -672,7 +672,7 @@ const App = props => {
   }, [dispatch]);
 
   const _loadSampleData = useCallback(() => {
-    _loadPointData();
+    // _loadPointData();
     // _loadGeojsonData();
     // _loadTripGeoJson();
     // _loadIconData();
