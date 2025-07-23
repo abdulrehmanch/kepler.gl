@@ -113,6 +113,7 @@ const LoginModal = () => {
     allowed_layers: {layer_name: string}[];
   }> | null>(null);
   const [selectedLayer, setSelectedLayer] = useState<string | null>(null);
+  const [isLayerLoading, setIsLayerLoading] = useState(false);
 
   // Function to fetch user layers
   const fetchUserLayers = async (token: string) => {
@@ -251,9 +252,12 @@ const LoginModal = () => {
                   onClick={async () => {
                     const layerUrl = `${baseUrl}/be/serve-layer/?layer_name=${selectedLayer}`;
 
+                    // Set loading state to true before starting the fetch
+                    setIsLayerLoading(true);
+
                     try {
                       // Fetch from API
-                      console.log(`Fetching GeoJSON data from: ${layerUrl}`);
+                      console.log(`Fetching data from: ${layerUrl}`);
 
                       // Get the auth token from localStorage
                       const token = localStorage.getItem('authToken');
@@ -266,20 +270,86 @@ const LoginModal = () => {
                       });
 
                       if (!response.ok) {
-                        throw new Error(`Failed to fetch GeoJSON: ${response.statusText}`);
+                        throw new Error(`Failed to fetch data: ${response.statusText}`);
                       }
 
-                      const geojsonData = await response.json();
+                      // Determine file type (parquet or geojson)
+                      const isParquet = response.headers
+                        .get('Content-Type')
+                        ?.includes('application/octet-stream');
 
-                      // Convert the GeoJSON data to a File object
-                      const blob = new Blob([JSON.stringify(geojsonData)], {
-                        type: 'application/json'
-                      });
+                      let file;
 
-                      // Create a File object from the Blob
-                      const file = new File([blob], `${selectedLayer}.geojson`, {
-                        type: 'application/json'
-                      });
+                      try {
+                        if (isParquet) {
+                          // Handle parquet file - read as blob
+                          const blob = await response.blob();
+
+                          // Create a File object from the Blob
+                          file = new File([blob], `${selectedLayer}.parquet`, {
+                            type: 'application/octet-stream'
+                          });
+
+                          console.log('Processing parquet file');
+                        } else {
+                          // Handle GeoJSON file - parse as JSON
+                          const geojsonData = await response.json();
+
+                          // Convert the GeoJSON data to a File object
+                          const blob = new Blob([JSON.stringify(geojsonData)], {
+                            type: 'application/json'
+                          });
+
+                          // Create a File object from the Blob
+                          file = new File([blob], `${selectedLayer}.geojson`, {
+                            type: 'application/json'
+                          });
+
+                          console.log('Processing GeoJSON file');
+                        }
+                      } catch (processingError) {
+                        console.error('Error processing file:', processingError);
+
+                        // If parquet processing fails, try fallback to GeoJSON
+                        if (isParquet) {
+                          console.log('Parquet processing failed, trying GeoJSON fallback');
+                          try {
+                            // Clone the response for a second attempt
+                            const clonedResponse = await fetch(layerUrl, {
+                              headers: {
+                                Authorization: `Token ${token}`,
+                                'Content-Type': 'application/json'
+                              }
+                            });
+
+                            if (!clonedResponse.ok) {
+                              throw new Error(`Failed to fetch data: ${clonedResponse.statusText}`);
+                            }
+
+                            const geojsonData = await clonedResponse.json();
+
+                            // Convert the GeoJSON data to a File object
+                            const blob = new Blob([JSON.stringify(geojsonData)], {
+                              type: 'application/json'
+                            });
+
+                            // Create a File object from the Blob
+                            file = new File([blob], `${selectedLayer}.geojson`, {
+                              type: 'application/json'
+                            });
+
+                            console.log('Fallback to GeoJSON successful');
+                          } catch (fallbackError) {
+                            console.error('Fallback also failed:', fallbackError);
+                            throw new Error(
+                              'Could not load data in any format. Please try a different layer.'
+                            );
+                          }
+                        } else {
+                          // Re-throw the original error if not a parquet file
+                          throw processingError;
+                        }
+                      }
 
                       // Use the default file handlers to process the file
                       dispatch(
@@ -308,21 +378,26 @@ const LoginModal = () => {
                       console.error('Error adding layer to map:', error);
                       // @ts-ignore
                       alert(`Failed to add layer to map: ${error.message}`);
+                    } finally {
+                      // Set loading state back to false when operation completes
+                      setIsLayerLoading(false);
                     }
                   }}
                   style={{
                     padding: '8px 12px',
-                    backgroundColor: '#4CAF50',
+                    backgroundColor: isLayerLoading ? '#7bba7f' : '#4CAF50',
                     color: 'white',
                     border: 'none',
                     borderRadius: '4px',
-                    cursor: 'pointer',
+                    cursor: isLayerLoading ? 'wait' : 'pointer',
                     fontSize: '14px',
                     marginTop: '10px',
-                    width: '100%'
+                    width: '100%',
+                    opacity: isLayerLoading ? 0.7 : 1
                   }}
+                  disabled={isLayerLoading}
                 >
-                  Add to Map
+                  {isLayerLoading ? 'Loading...' : 'Add to Map'}
                 </button>
               )}
             </div>
