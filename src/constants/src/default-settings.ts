@@ -101,7 +101,7 @@ export const OVERWRITE_MAP_ID = 'overwriteMap';
  */
 export const SHARE_MAP_ID = 'shareMap';
 
-export const KEPLER_GL_NAME = 'kepler.gl';
+export const KEPLER_GL_NAME = 'zeroelectric.co';
 
 // __PACKAGE_VERSION__ is automatically injected by Babel/Esbuild during the build process
 // Since we are injecting this during the build process with babel

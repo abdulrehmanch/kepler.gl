@@ -118,6 +118,7 @@ const LoginModal = () => {
   // Function to fetch user layers
   const fetchUserLayers = async (token: string) => {
     try {
+      setIsLayerLoading(true);
       const response = await fetch(`${baseUrl}/be/api/user-layers/`, {
         method: 'GET',
         headers: {
@@ -130,11 +131,36 @@ const LoginModal = () => {
         const data = await response.json();
         console.log('User layers:', data);
         setUserLayers(data);
+
+        // Store layers in localStorage with the required format
+        if (data && data[0] && data[0].allowed_layers) {
+          // Get existing layers from localStorage
+          const existingLayersStr = localStorage.getItem('userLayers');
+          const existingLayers = existingLayersStr ? JSON.parse(existingLayersStr) : {};
+
+          // Update or add each layer
+          data[0].allowed_layers.forEach((layer: {layer_name: string}) => {
+            // Preserve addedToMap status if the layer already exists, otherwise set to false
+            const addedToMap = existingLayers[layer.layer_name]
+              ? existingLayers[layer.layer_name].addedToMap
+              : false;
+
+            existingLayers[layer.layer_name] = {
+              user_layer: layer.layer_name,
+              addedToMap
+            };
+          });
+
+          // Save back to localStorage
+          localStorage.setItem('userLayers', JSON.stringify(existingLayers));
+        }
       } else {
         console.error('Failed to fetch user layers:', await response.text());
       }
     } catch (error) {
       console.error('Error fetching user layers:', error);
+    } finally {
+      setIsLayerLoading(false);
     }
   };
 
@@ -143,13 +169,16 @@ const LoginModal = () => {
     const token = localStorage.getItem('authToken');
     if (token) {
       setIsLoggedIn(true);
-      fetchUserLayers(token);
+      fetchUserLayers(token).then(r => {
+        console.log('User layers updated', r);
+      });
     }
   }, []);
 
   // Logout function
   const handleLogout = () => {
     localStorage.removeItem('authToken');
+    localStorage.removeItem('userLayers');
     setIsLoggedIn(false);
     setUserLayers(null);
   };
@@ -195,6 +224,155 @@ const LoginModal = () => {
     }
   };
 
+  const handleAddLayer = async () => {
+    const layerUrl = `${baseUrl}/be/serve-layer/?layer_name=${selectedLayer}`;
+
+    // Set loading state to true before starting the fetch
+    setIsLayerLoading(true);
+
+    try {
+      // Fetch from API
+      console.log(`Fetching data from: ${layerUrl}`);
+
+      // Get the auth token from localStorage
+      const token = localStorage.getItem('authToken');
+
+      const response = await fetch(layerUrl, {
+        headers: {
+          Authorization: `Token ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch data: ${response.statusText}`);
+      }
+
+      // Determine file type (parquet or geojson)
+      const isParquet = response.headers.get('Content-Type')?.includes('application/octet-stream');
+
+      let file;
+
+      try {
+        if (isParquet) {
+          // Handle parquet file - read as blob
+          const blob = await response.blob();
+
+          // Create a File object from the Blob
+          file = new File([blob], `${selectedLayer}.parquet`, {
+            type: 'application/octet-stream'
+          });
+
+          console.log('Processing parquet file');
+        } else {
+          // Handle GeoJSON file - parse as JSON
+          const geojsonData = await response.json();
+
+          // Convert the GeoJSON data to a File object
+          const blob = new Blob([JSON.stringify(geojsonData)], {
+            type: 'application/json'
+          });
+
+          // Create a File object from the Blob
+          file = new File([blob], `${selectedLayer}.geojson`, {
+            type: 'application/json'
+          });
+
+          console.log('Processing GeoJSON file');
+        }
+      } catch (processingError) {
+        console.error('Error processing file:', processingError);
+
+        // If parquet processing fails, try fallback to GeoJSON
+        if (isParquet) {
+          console.log('Parquet processing failed, trying GeoJSON fallback');
+          try {
+            // Clone the response for a second attempt
+            const clonedResponse = await fetch(layerUrl, {
+              headers: {
+                Authorization: `Token ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (!clonedResponse.ok) {
+              throw new Error(`Failed to fetch data: ${clonedResponse.statusText}`);
+            }
+
+            const geojsonData = await clonedResponse.json();
+
+            // Convert the GeoJSON data to a File object
+            const blob = new Blob([JSON.stringify(geojsonData)], {
+              type: 'application/json'
+            });
+
+            // Create a File object from the Blob
+            file = new File([blob], `${selectedLayer}.geojson`, {
+              type: 'application/json'
+            });
+
+            console.log('Fallback to GeoJSON successful');
+          } catch (fallbackError) {
+            console.error('Fallback also failed:', fallbackError);
+            throw new Error('Could not load data in any format. Please try a different layer.');
+          }
+        } else {
+          // Re-throw the original error if not a parquet file
+          throw processingError;
+        }
+      }
+
+      // Use the default file handlers to process the file
+      dispatch(
+        loadFiles([file], fileCache => {
+          // Convert file cache to data payloads
+          const payloads = filesToDataPayload(fileCache);
+
+          // Add data to map with centerMap option
+          payloads.forEach(payload => {
+            dispatch(
+              addDataToMap({
+                ...payload,
+                options: {
+                  ...payload.options,
+                  centerMap: true
+                }
+              })
+            );
+          });
+
+          // Return the action object directly instead of dispatching it
+
+          // Update localStorage to mark this layer as added to map
+          if (selectedLayer) {
+            try {
+              const userLayersStr = localStorage.getItem('userLayers');
+              if (userLayersStr) {
+                const userLayers = JSON.parse(userLayersStr);
+                if (userLayers[selectedLayer]) {
+                  userLayers[selectedLayer].addedToMap = true;
+                  localStorage.setItem('userLayers', JSON.stringify(userLayers));
+                  console.log(`Updated localStorage: ${selectedLayer} marked as added to map`);
+                }
+              }
+            } catch (storageError) {
+              console.error('Error updating localStorage:', storageError);
+            }
+          }
+
+          return toggleModal(null);
+        })
+      );
+    } catch (error) {
+      console.error('Error adding layer to map:', error);
+      // @ts-ignore
+      alert(`Failed to add layer to map: ${error.message}`);
+    } finally {
+      // Set loading state back to false when operation completes
+      setIsLayerLoading(false);
+    }
+  };
+
   return (
     <div style={{padding: '20px'}}>
       {isLoggedIn ? (
@@ -209,7 +387,37 @@ const LoginModal = () => {
           userLayers[0].allowed_layers &&
           userLayers[0].allowed_layers.length > 0 ? (
             <div style={{marginBottom: '20px', textAlign: 'left'}}>
-              <h4 style={{marginBottom: '10px'}}>Your Layers:</h4>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '10px'
+                }}
+              >
+                <h4 style={{margin: 0}}>Your Layers:</h4>
+                <button
+                  onClick={() => {
+                    const token = localStorage.getItem('authToken');
+                    if (token) {
+                      fetchUserLayers(token);
+                    }
+                  }}
+                  style={{
+                    padding: '5px 10px',
+                    backgroundColor: isLayerLoading ? '#7b7bba' : '#5555AA',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: isLayerLoading ? 'wait' : 'pointer',
+                    fontSize: '12px',
+                    opacity: isLayerLoading ? 0.7 : 1
+                  }}
+                  disabled={isLayerLoading}
+                >
+                  {isLayerLoading ? 'Refreshing...' : 'Refresh Layers'}
+                </button>
+              </div>
               <ul
                 style={{
                   listStyleType: 'none',
@@ -249,140 +457,7 @@ const LoginModal = () => {
               </ul>
               {selectedLayer && (
                 <button
-                  onClick={async () => {
-                    const layerUrl = `${baseUrl}/be/serve-layer/?layer_name=${selectedLayer}`;
-
-                    // Set loading state to true before starting the fetch
-                    setIsLayerLoading(true);
-
-                    try {
-                      // Fetch from API
-                      console.log(`Fetching data from: ${layerUrl}`);
-
-                      // Get the auth token from localStorage
-                      const token = localStorage.getItem('authToken');
-
-                      const response = await fetch(layerUrl, {
-                        headers: {
-                          Authorization: `Token ${token}`,
-                          'Content-Type': 'application/json'
-                        }
-                      });
-
-                      if (!response.ok) {
-                        throw new Error(`Failed to fetch data: ${response.statusText}`);
-                      }
-
-                      // Determine file type (parquet or geojson)
-                      const isParquet = response.headers
-                        .get('Content-Type')
-                        ?.includes('application/octet-stream');
-
-                      let file;
-
-                      try {
-                        if (isParquet) {
-                          // Handle parquet file - read as blob
-                          const blob = await response.blob();
-
-                          // Create a File object from the Blob
-                          file = new File([blob], `${selectedLayer}.parquet`, {
-                            type: 'application/octet-stream'
-                          });
-
-                          console.log('Processing parquet file');
-                        } else {
-                          // Handle GeoJSON file - parse as JSON
-                          const geojsonData = await response.json();
-
-                          // Convert the GeoJSON data to a File object
-                          const blob = new Blob([JSON.stringify(geojsonData)], {
-                            type: 'application/json'
-                          });
-
-                          // Create a File object from the Blob
-                          file = new File([blob], `${selectedLayer}.geojson`, {
-                            type: 'application/json'
-                          });
-
-                          console.log('Processing GeoJSON file');
-                        }
-                      } catch (processingError) {
-                        console.error('Error processing file:', processingError);
-
-                        // If parquet processing fails, try fallback to GeoJSON
-                        if (isParquet) {
-                          console.log('Parquet processing failed, trying GeoJSON fallback');
-                          try {
-                            // Clone the response for a second attempt
-                            const clonedResponse = await fetch(layerUrl, {
-                              headers: {
-                                Authorization: `Token ${token}`,
-                                'Content-Type': 'application/json'
-                              }
-                            });
-
-                            if (!clonedResponse.ok) {
-                              throw new Error(`Failed to fetch data: ${clonedResponse.statusText}`);
-                            }
-
-                            const geojsonData = await clonedResponse.json();
-
-                            // Convert the GeoJSON data to a File object
-                            const blob = new Blob([JSON.stringify(geojsonData)], {
-                              type: 'application/json'
-                            });
-
-                            // Create a File object from the Blob
-                            file = new File([blob], `${selectedLayer}.geojson`, {
-                              type: 'application/json'
-                            });
-
-                            console.log('Fallback to GeoJSON successful');
-                          } catch (fallbackError) {
-                            console.error('Fallback also failed:', fallbackError);
-                            throw new Error(
-                              'Could not load data in any format. Please try a different layer.'
-                            );
-                          }
-                        } else {
-                          // Re-throw the original error if not a parquet file
-                          throw processingError;
-                        }
-                      }
-
-                      // Use the default file handlers to process the file
-                      dispatch(
-                        loadFiles([file], fileCache => {
-                          // Convert file cache to data payloads
-                          const payloads = filesToDataPayload(fileCache);
-
-                          // Add data to map with centerMap option
-                          payloads.forEach(payload => {
-                            dispatch(
-                              addDataToMap({
-                                ...payload,
-                                options: {
-                                  ...payload.options,
-                                  centerMap: true
-                                }
-                              })
-                            );
-                          });
-
-                          // Return the action object directly instead of dispatching it
-                          return toggleModal(null);
-                        })
-                      );
-                    } catch (error) {
-                      console.error('Error adding layer to map:', error);
-                      // @ts-ignore
-                      alert(`Failed to add layer to map: ${error.message}`);
-                    } finally {
-                      // Set loading state back to false when operation completes
-                      setIsLayerLoading(false);
-                    }
-                  }}
+                  onClick={async () => handleAddLayer()}
                   style={{
                     padding: '8px 12px',
                     backgroundColor: isLayerLoading ? '#7bba7f' : '#4CAF50',

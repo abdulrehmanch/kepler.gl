@@ -55,7 +55,7 @@ const KeplerGlLogo = ({
 }: KeplerGlLogoProps) => (
   <LogoWrapper className="side-panel-logo">
     <LogoSvgWrapper>
-      <LogoSvg />
+      {/*<LogoSvg />*/}
     </LogoSvgWrapper>
     <LogoTitle className="logo__title">
       <LogoName className="logo__name">
