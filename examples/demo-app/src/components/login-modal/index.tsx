@@ -56,8 +56,12 @@ const formContainerStyle = {
   marginTop: '20px'
 };
 
-const baseUrl = 'http://localhost:8000'; // Replace with your actual base URL
-// const baseUrl = 'https://gridmaps.geosoftsolution.com';
+// Dynamically choose the base URL based on the build environment
+// If yarn build is called (production), use the live backend, otherwise use localhost
+let baseUrl = 'http://localhost:8000';
+if (process.env.NODE_ENV === 'production') {
+  baseUrl = 'https://gridmaps.geosoftsolution.com';
+}
 // Real API login endpoint function
 const loginEndpoint = async (
   username: string,
@@ -164,6 +168,62 @@ const LoginModal = () => {
     }
   };
 
+  // Function to load saved layers from localStorage
+  const loadSavedLayers = () => {
+    try {
+      const userLayersStr = localStorage.getItem('userLayers');
+      if (!userLayersStr) {
+        console.log('No saved layers found in localStorage');
+        return;
+      }
+
+      const savedLayers = JSON.parse(userLayersStr);
+      if (!savedLayers || typeof savedLayers !== 'object') {
+        console.log('Invalid userLayers format in localStorage');
+        return;
+      }
+
+      console.log('Loading saved layers from localStorage:', savedLayers);
+
+      // Track layers that need to be added
+      const layersToAdd = [];
+
+      // Check each layer
+      for (const layerName in savedLayers) {
+        const layer = savedLayers[layerName];
+        if (layer && layer.addedToMap === true) {
+          console.log(`Layer ${layerName} was previously added to map, will restore it`);
+          // @ts-ignore
+          layersToAdd.push(layerName);
+        }
+      }
+
+      // Add layers sequentially to avoid overwhelming the system
+      if (layersToAdd.length > 0) {
+        console.log(`Found ${layersToAdd.length} layers to restore`);
+
+        // Add first layer immediately, then add others with a delay
+        const addLayersSequentially = async () => {
+          for (let i = 0; i < layersToAdd.length; i++) {
+            try {
+              await handleAddLayer(layersToAdd[i]);
+              // Small delay between adding layers
+              if (i < layersToAdd.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
+            } catch (error) {
+              console.error(`Error adding layer ${layersToAdd[i]}:`, error);
+            }
+          }
+        };
+
+        addLayersSequentially();
+      }
+    } catch (error) {
+      console.error('Error loading saved layers:', error);
+    }
+  };
+
   // Check if user is already logged in on component mount
   React.useEffect(() => {
     const token = localStorage.getItem('authToken');
@@ -171,6 +231,8 @@ const LoginModal = () => {
       setIsLoggedIn(true);
       fetchUserLayers(token).then(r => {
         console.log('User layers updated', r);
+        // Load saved layers after fetching user layers
+        loadSavedLayers();
       });
     }
   }, []);
@@ -224,8 +286,9 @@ const LoginModal = () => {
     }
   };
 
-  const handleAddLayer = async () => {
-    const layerUrl = `${baseUrl}/be/serve-layer/?layer_name=${selectedLayer}`;
+  // @ts-ignore
+  const handleAddLayer = async (layerName: string = selectedLayer) => {
+    const layerUrl = `${baseUrl}/be/serve-layer/?layer_name=${layerName}`;
 
     // Set loading state to true before starting the fetch
     setIsLayerLoading(true);
@@ -259,7 +322,7 @@ const LoginModal = () => {
           const blob = await response.blob();
 
           // Create a File object from the Blob
-          file = new File([blob], `${selectedLayer}.parquet`, {
+          file = new File([blob], `${layerName}.parquet`, {
             type: 'application/octet-stream'
           });
 
@@ -274,7 +337,7 @@ const LoginModal = () => {
           });
 
           // Create a File object from the Blob
-          file = new File([blob], `${selectedLayer}.geojson`, {
+          file = new File([blob], `${layerName}.geojson`, {
             type: 'application/json'
           });
 
@@ -307,7 +370,7 @@ const LoginModal = () => {
             });
 
             // Create a File object from the Blob
-            file = new File([blob], `${selectedLayer}.geojson`, {
+            file = new File([blob], `${layerName}.geojson`, {
               type: 'application/json'
             });
 
@@ -344,15 +407,15 @@ const LoginModal = () => {
           // Return the action object directly instead of dispatching it
 
           // Update localStorage to mark this layer as added to map
-          if (selectedLayer) {
+          if (layerName) {
             try {
               const userLayersStr = localStorage.getItem('userLayers');
               if (userLayersStr) {
                 const userLayers = JSON.parse(userLayersStr);
-                if (userLayers[selectedLayer]) {
-                  userLayers[selectedLayer].addedToMap = true;
+                if (userLayers[layerName]) {
+                  userLayers[layerName].addedToMap = true;
                   localStorage.setItem('userLayers', JSON.stringify(userLayers));
-                  console.log(`Updated localStorage: ${selectedLayer} marked as added to map`);
+                  console.log(`Updated localStorage: ${layerName} marked as added to map`);
                 }
               }
             } catch (storageError) {
