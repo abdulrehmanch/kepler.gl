@@ -6,6 +6,8 @@ import {css} from 'styled-components';
 import {toggleModal, addDataToMap, loadFiles} from '@kepler.gl/actions';
 import {useDispatch} from 'react-redux';
 import {filesToDataPayload} from '@kepler.gl/processors';
+import {baseUrl} from '../../config';
+import useMapSaveRestore from '../map-save-restore';
 // We no longer need to import processGeojson as we'll use the default file handlers
 
 // Define a custom modal ID for the login modal
@@ -56,12 +58,6 @@ const formContainerStyle = {
   marginTop: '20px'
 };
 
-// Dynamically choose the base URL based on the build environment
-// If yarn build is called (production), use the live backend, otherwise use localhost
-let baseUrl = 'http://localhost:8000';
-if (process.env.NODE_ENV === 'production') {
-  baseUrl = 'https://gridmaps.geosoftsolution.com';
-}
 // Real API login endpoint function
 const loginEndpoint = async (
   username: string,
@@ -107,6 +103,7 @@ const loginEndpoint = async (
 // Create login modal component with form fields
 const LoginModal = () => {
   const dispatch = useDispatch();
+  const {saveMap, restoreMap} = useMapSaveRestore();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -119,18 +116,12 @@ const LoginModal = () => {
   }> | null>(null);
   const [selectedLayers, setSelectedLayers] = useState<{[key: string]: boolean}>({});
   const [isLayerLoading, setIsLayerLoading] = useState(false);
+  const [mapName, setMapName] = useState('');
 
   // Function to check if a layer is already added to map
   const isLayerAddedToMap = (layerName: string): boolean => {
-    try {
-      const userLayersStr = localStorage.getItem('userLayers');
-      if (userLayersStr) {
-        const userLayers = JSON.parse(userLayersStr);
-        return userLayers[layerName]?.addedToMap === true;
-      }
-    } catch (error) {
-      console.error('Error checking if layer is added to map:', error);
-    }
+    // Local persistence of added-to-map status has been removed.
+    // Always return false to avoid showing a persisted checkmark.
     return false;
   };
 
@@ -164,13 +155,6 @@ const LoginModal = () => {
 
   // Function to fetch user layers
   const fetchUserLayers = async (token: string, refresh = false) => {
-    const userLayersFromStorage = localStorage.getItem('userLayersData');
-    if (userLayersFromStorage && !refresh) {
-      const parsed = JSON.parse(userLayersFromStorage);
-      const normalized = normalizeUserLayers(parsed);
-      setUserLayers(normalized);
-      return;
-    }
     try {
       console.log('Fetching user layers...');
       setIsLayerLoading(true);
@@ -187,30 +171,6 @@ const LoginModal = () => {
         console.log('User layers:', data);
         const normalized = normalizeUserLayers(data);
         setUserLayers(normalized);
-        localStorage.setItem('userLayersData', JSON.stringify(normalized));
-
-        // Store layers in localStorage with the required format
-        if (normalized && normalized[0] && Array.isArray(normalized[0].datasets)) {
-          // Get existing layers from localStorage
-          const existingLayersStr = localStorage.getItem('userLayers');
-          const existingLayers = existingLayersStr ? JSON.parse(existingLayersStr) : {};
-
-          // Update or add each layer
-          normalized[0].datasets.forEach((layerName: string) => {
-            // Preserve addedToMap status if the layer already exists, otherwise set to false
-            const addedToMap = existingLayers[layerName]
-              ? existingLayers[layerName].addedToMap
-              : false;
-
-            existingLayers[layerName] = {
-              user_layer: layerName,
-              addedToMap
-            };
-          });
-
-          // Save back to localStorage
-          localStorage.setItem('userLayers', JSON.stringify(existingLayers));
-        }
       } else {
         console.error('Failed to fetch user layers:', await response.text());
       }
@@ -221,62 +181,6 @@ const LoginModal = () => {
     }
   };
 
-  // Function to load saved layers from localStorage
-  // const loadSavedLayers = () => {
-  //   try {
-  //     const userLayersStr = localStorage.getItem('userLayers');
-  //     if (!userLayersStr) {
-  //       console.log('No saved layers found in localStorage');
-  //       return;
-  //     }
-  //
-  //     const savedLayers = JSON.parse(userLayersStr);
-  //     if (!savedLayers || typeof savedLayers !== 'object') {
-  //       console.log('Invalid userLayers format in localStorage');
-  //       return;
-  //     }
-  //
-  //     console.log('Loading saved layers from localStorage:', savedLayers);
-  //
-  //     // Track layers that need to be added
-  //     const layersToAdd = [];
-  //
-  //     // Check each layer
-  //     for (const layerName in savedLayers) {
-  //       const layer = savedLayers[layerName];
-  //       if (layer && layer.addedToMap === true) {
-  //         console.log(`Layer ${layerName} was previously added to map, will restore it`);
-  //         // @ts-ignore
-  //         layersToAdd.push(layerName);
-  //       }
-  //     }
-  //
-  //     // Add layers sequentially to avoid overwhelming the system
-  //     if (layersToAdd.length > 0) {
-  //       console.log(`Found ${layersToAdd.length} layers to restore`);
-  //
-  //       // Add first layer immediately, then add others with a delay
-  //       const addLayersSequentially = async () => {
-  //         for (let i = 0; i < layersToAdd.length; i++) {
-  //           try {
-  //             await handleAddLayer(layersToAdd[i]);
-  //             // Small delay between adding layers
-  //             if (i < layersToAdd.length - 1) {
-  //               await new Promise(resolve => setTimeout(resolve, 1000));
-  //             }
-  //           } catch (error) {
-  //             console.error(`Error adding layer ${layersToAdd[i]}:`, error);
-  //           }
-  //         }
-  //       };
-  //
-  //       addLayersSequentially();
-  //     }
-  //   } catch (error) {
-  //     console.error('Error loading saved layers:', error);
-  //   }
-  // };
-
   // Check if user is already logged in on component mount
   React.useEffect(() => {
     const token = localStorage.getItem('authToken');
@@ -284,8 +188,6 @@ const LoginModal = () => {
       setIsLoggedIn(true);
       fetchUserLayers(token).then(r => {
         console.log('User layers updated', r);
-        // Load saved layers after fetching user layers
-        // loadSavedLayers();
       });
     }
   }, []);
@@ -293,7 +195,6 @@ const LoginModal = () => {
   // Logout function
   const handleLogout = () => {
     localStorage.removeItem('authToken');
-    localStorage.removeItem('userLayers');
     setIsLoggedIn(false);
     setUserLayers(null);
   };
@@ -457,23 +358,6 @@ const LoginModal = () => {
             );
           });
 
-          // Update localStorage to mark this layer as added to map
-          if (layerName) {
-            try {
-              const userLayersStr = localStorage.getItem('userLayers');
-              if (userLayersStr) {
-                const userLayers = JSON.parse(userLayersStr);
-                if (userLayers[layerName]) {
-                  userLayers[layerName].addedToMap = true;
-                  localStorage.setItem('userLayers', JSON.stringify(userLayers));
-                  console.log(`Updated localStorage: ${layerName} marked as added to map`);
-                }
-              }
-            } catch (storageError) {
-              console.error('Error updating localStorage:', storageError);
-            }
-          }
-
           // Don't close the modal after adding a layer
           return null;
         })
@@ -628,6 +512,47 @@ const LoginModal = () => {
               {userLayers === null ? 'Loading your layers...' : 'No layers found.'}
             </p>
           )}
+
+          <div style={{marginTop: '10px'}}>
+            <label htmlFor="map-name" style={{display: 'block', marginBottom: '5px', fontSize: '14px'}}>
+              Map Name
+            </label>
+            <input
+              id="map-name"
+              type="text"
+              value={mapName}
+              onChange={e => setMapName(e.target.value)}
+              style={inputStyle}
+              placeholder="Enter a name for this map"
+            />
+          </div>
+
+          <div style={{display: 'flex', gap: '10px', marginTop: '10px', marginBottom: '10px'}}>
+            <button
+              type="button"
+              onClick={() => saveMap(mapName)}
+              style={{
+                ...buttonStyle,
+                backgroundColor: '#2e7d32',
+                marginBottom: 0,
+                width: '50%'
+              }}
+            >
+              Save Map
+            </button>
+            <button
+              type="button"
+              onClick={restoreMap}
+              style={{
+                ...buttonStyle,
+                backgroundColor: '#1976d2',
+                marginBottom: 0,
+                width: '50%'
+              }}
+            >
+              Restore Map
+            </button>
+          </div>
 
           <button
             type="button"
