@@ -7,7 +7,7 @@ import {toggleModal, addDataToMap, loadFiles} from '@kepler.gl/actions';
 import {useDispatch} from 'react-redux';
 import {filesToDataPayload} from '@kepler.gl/processors';
 import {baseUrl} from '../../config';
-import useMapSaveRestore from '../map-save-restore';
+import MapWizardTabs from './map-wizard-tabs';
 // We no longer need to import processGeojson as we'll use the default file handlers
 
 // Define a custom modal ID for the login modal
@@ -103,7 +103,6 @@ const loginEndpoint = async (
 // Create login modal component with form fields
 const LoginModal = () => {
   const dispatch = useDispatch();
-  const {saveMap, restoreMap} = useMapSaveRestore();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -116,14 +115,6 @@ const LoginModal = () => {
   }> | null>(null);
   const [selectedLayers, setSelectedLayers] = useState<{[key: string]: boolean}>({});
   const [isLayerLoading, setIsLayerLoading] = useState(false);
-  const [mapName, setMapName] = useState('');
-
-  // Function to check if a layer is already added to map
-  const isLayerAddedToMap = (layerName: string): boolean => {
-    // Local persistence of added-to-map status has been removed.
-    // Always return false to avoid showing a persisted checkmark.
-    return false;
-  };
 
   // Helper to normalize user-layers payload to always have datasets: string[]
   const normalizeUserLayers = (
@@ -191,6 +182,7 @@ const LoginModal = () => {
       });
     }
   }, []);
+
 
   // Logout function
   const handleLogout = () => {
@@ -379,203 +371,30 @@ const LoginModal = () => {
         <div style={{textAlign: 'center'}}>
           <h3 style={{textAlign: 'center', marginBottom: '10px', fontSize: '16px'}}>Welcome</h3>
           <p style={{marginBottom: '10px', fontSize: '14px'}}>You are logged in successfully.</p>
+          <MapWizardTabs
+                      layers={userLayers && userLayers[0] && userLayers[0].datasets ? userLayers[0].datasets : []}
+                      isLayerLoading={isLayerLoading}
+                      selectedLayers={selectedLayers}
+                      onToggleLayer={(name: string) =>
+                        setSelectedLayers(prev => ({...prev, [name]: !prev[name]}))
+                      }
+                      onRefreshLayers={() => {
+                        const token = localStorage.getItem('authToken');
+                        if (token) {
+                          fetchUserLayers(token, true);
+                        }
+                      }}
+                      onAddSelectedLayers={async () => {
+                        const layersToAdd = Object.keys(selectedLayers).filter(k => selectedLayers[k]);
+                        for (const name of layersToAdd) {
+                          // eslint-disable-next-line no-await-in-loop
+                          await handleAddLayer(name);
+                        }
+                      }}
+                      onLogout={handleLogout}
+                      onClose={() => dispatch(toggleModal(null))}
+                    />
 
-          {/* Display user layers if available */}
-          {userLayers &&
-          userLayers[0] &&
-          userLayers[0].datasets &&
-          userLayers[0].datasets.length > 0 ? (
-            <div style={{marginBottom: '20px', textAlign: 'left'}}>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: '10px'
-                }}
-              >
-                <div>
-                  <h4 style={{margin: 0}}>Your Layers:</h4>
-                  <p
-                    style={{
-                      margin: '5px 0 0 0',
-                      fontSize: '12px',
-                      color: '#666',
-                      fontStyle: 'italic'
-                    }}
-                  >
-                    (Note: do not select more than 3 layers at a time)
-                  </p>
-                </div>
-                <button
-                  onClick={() => {
-                    const token = localStorage.getItem('authToken');
-                    if (token) {
-                      fetchUserLayers(token, true);
-                    }
-                  }}
-                  style={{
-                    padding: '5px 10px',
-                    backgroundColor: isLayerLoading ? '#7b7bba' : '#5555AA',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: isLayerLoading ? 'wait' : 'pointer',
-                    fontSize: '12px',
-                    opacity: isLayerLoading ? 0.7 : 1
-                  }}
-                  disabled={isLayerLoading}
-                >
-                  {isLayerLoading ? 'Refreshing...' : 'Refresh Layers'}
-                </button>
-              </div>
-              <ul
-                style={{
-                  listStyleType: 'none',
-                  padding: '10px',
-                  backgroundColor: '#f8f8f8',
-                  borderRadius: '4px',
-                  maxHeight: '250px',
-                  overflowY: 'auto'
-                }}
-              >
-                {userLayers[0].datasets.map((layerName, index) => (
-                  <li
-                    key={index}
-                    style={{
-                      padding: '5px 0',
-                      borderBottom:
-                        index < userLayers[0].datasets.length - 1 ? '1px solid #eee' : 'none',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center'
-                    }}
-                  >
-                    <div style={{display: 'flex', alignItems: 'center'}}>
-                      <input
-                        type="checkbox"
-                        id={`layer-${index}`}
-                        name={layerName}
-                        value={layerName}
-                        checked={!!selectedLayers[layerName]}
-                        onChange={() => {
-                          setSelectedLayers(prev => ({
-                            ...prev,
-                            [layerName]: !prev[layerName]
-                          }));
-                        }}
-                        style={{marginRight: '8px'}}
-                      />
-                      <label htmlFor={`layer-${index}`}>
-                        {layerName}
-                        {isLayerAddedToMap(layerName) && (
-                          <span style={{marginLeft: '5px', color: '#4CAF50'}}>✓</span>
-                        )}
-                      </label>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-              {Object.values(selectedLayers).some(selected => selected) && (
-                <button
-                  onClick={async () => {
-                    // Get all selected layer names
-                    const layersToAdd = Object.keys(selectedLayers).filter(
-                      layerName => selectedLayers[layerName]
-                    );
-
-                    // Add each selected layer sequentially
-                    for (const layerName of layersToAdd) {
-                      await handleAddLayer(layerName);
-                    }
-                  }}
-                  style={{
-                    padding: '8px 12px',
-                    backgroundColor: isLayerLoading ? '#7bba7f' : '#4CAF50',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: isLayerLoading ? 'wait' : 'pointer',
-                    fontSize: '14px',
-                    marginTop: '10px',
-                    width: '100%',
-                    opacity: isLayerLoading ? 0.7 : 1
-                  }}
-                  disabled={isLayerLoading}
-                >
-                  {isLayerLoading ? 'Loading...' : 'Add Selected Layers to Map'}
-                </button>
-              )}
-            </div>
-          ) : (
-            <p style={{marginBottom: '20px', color: '#888'}}>
-              {userLayers === null ? 'Loading your layers...' : 'No layers found.'}
-            </p>
-          )}
-
-          <div style={{marginTop: '10px'}}>
-            <label htmlFor="map-name" style={{display: 'block', marginBottom: '5px', fontSize: '14px'}}>
-              Map Name
-            </label>
-            <input
-              id="map-name"
-              type="text"
-              value={mapName}
-              onChange={e => setMapName(e.target.value)}
-              style={inputStyle}
-              placeholder="Enter a name for this map"
-            />
-          </div>
-
-          <div style={{display: 'flex', gap: '10px', marginTop: '10px', marginBottom: '10px'}}>
-            <button
-              type="button"
-              onClick={() => saveMap(mapName)}
-              style={{
-                ...buttonStyle,
-                backgroundColor: '#2e7d32',
-                marginBottom: 0,
-                width: '50%'
-              }}
-            >
-              Save Map
-            </button>
-            <button
-              type="button"
-              onClick={restoreMap}
-              style={{
-                ...buttonStyle,
-                backgroundColor: '#1976d2',
-                marginBottom: 0,
-                width: '50%'
-              }}
-            >
-              Restore Map
-            </button>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleLogout}
-            style={{
-              ...buttonStyle,
-              backgroundColor: '#d9534f',
-              marginBottom: '10px'
-            }}
-          >
-            Logout
-          </button>
-
-          <button
-            type="button"
-            onClick={() => dispatch(toggleModal(null))}
-            style={{
-              ...buttonStyle,
-              backgroundColor: '#555'
-            }}
-          >
-            Close
-          </button>
         </div>
       ) : (
         // Not logged in state - show login form

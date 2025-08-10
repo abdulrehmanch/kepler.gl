@@ -23,6 +23,182 @@ export const useMapSaveRestore = () => {
   // Pull the reducer state for the specific kepler.gl instance id
   const mapState = useSelector((state: any) => state?.demo?.keplerGl?.map);
 
+  // Build config (without datasets) and endpoints from current mapState
+  const buildConfigAndEndpoints = useCallback(() => {
+    if (!mapState) {
+      throw new Error('Map state not available');
+    }
+    const config = KeplerGlSchema.getConfigToSave(mapState);
+    const datasetsObj = mapState?.visState?.datasets || {};
+    const endpoints: string[] = Array.from(
+      new Set(
+        Object.values(datasetsObj)
+          .map((ds: any) => {
+            const label: string = ds?.label || ds?.dataContainer?.props?.label || '';
+            if (!label) return null;
+            const name = label.replace(/\.(parquet|geojson|json|csv)$/i, '');
+            return `${baseUrl}/be/api/serve-layer/?layer_name=${encodeURIComponent(name)}`;
+          })
+          .filter(Boolean) as string[]
+      )
+    );
+    return {config, endpoints};
+  }, [mapState]);
+
+  // Programmatic APIs (no prompts/alerts), to be used by the modal wizard UI
+  const listMaps = useCallback(async (): Promise<any[]> => {
+    const token = localStorage.getItem('authToken');
+    if (!token) throw new Error('Not authenticated');
+    const res = await fetch(`${baseUrl}/be/api/maps/`, {
+      method: 'GET',
+      headers: {Authorization: `Token ${token}`, 'Content-Type': 'application/json'}
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `Failed to fetch maps: ${res.status} ${res.statusText}`);
+    }
+    const maps = await res.json();
+    return Array.isArray(maps) ? maps : [];
+  }, []);
+
+  const saveMapNew = useCallback(
+    async (mapName: string): Promise<void> => {
+      if (!mapName || !mapName.trim()) throw new Error('Map name is required');
+      const token = localStorage.getItem('authToken');
+      if (!token) throw new Error('Not authenticated');
+      const {config, endpoints} = buildConfigAndEndpoints();
+      const res = await fetch(`${baseUrl}/be/api/maps/`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', Authorization: `Token ${token}`},
+        body: JSON.stringify({map_name: mapName.trim(), map_config: config, endpoints})
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Failed to save map: ${res.status} ${res.statusText}`);
+      }
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({config}));
+      } catch {}
+    },
+    [buildConfigAndEndpoints]
+  );
+
+  const saveMapOverride = useCallback(
+    async (mapName: string, overrideId: string | number): Promise<void> => {
+      if (!mapName || !mapName.trim()) throw new Error('Map name is required');
+      if (overrideId === undefined || overrideId === null)
+        throw new Error('Override id is required');
+      const token = localStorage.getItem('authToken');
+      if (!token) throw new Error('Not authenticated');
+      const {config, endpoints} = buildConfigAndEndpoints();
+      const putUrl = `${baseUrl}/be/api/maps/${encodeURIComponent(String(overrideId))}/`;
+      const res = await fetch(putUrl, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json', Authorization: `Token ${token}`},
+        body: JSON.stringify({map_name: mapName.trim(), map_config: config, endpoints})
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Failed to override map: ${res.status} ${res.statusText}`);
+      }
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({config}));
+      } catch {}
+    },
+    [buildConfigAndEndpoints]
+  );
+
+  const restoreFromRecord = useCallback(
+    async (record: any): Promise<void> => {
+      const token = localStorage.getItem('authToken');
+      if (!token) throw new Error('Not authenticated');
+      if (!record) throw new Error('No map record provided');
+      const endpoints: string[] = Array.isArray(record.endpoints)
+        ? record.endpoints.filter((e: any) => typeof e === 'string')
+        : [];
+      const mapConfig = record.map_config || record.config || null;
+
+      const extractLayerName = (url: string): string => {
+        try {
+          const u = new URL(url);
+          const fromParam = u.searchParams.get('layer_name');
+          if (fromParam) return fromParam;
+          const path = u.pathname.split('/').filter(Boolean);
+          return path[path.length - 1] || 'layer';
+        } catch {
+          return 'layer';
+        }
+      };
+
+      const buildGeojsonUrl = (url: string): string => {
+        try {
+          const u = new URL(url);
+          if (!u.searchParams.get('format')) {
+            u.searchParams.set('format', 'geojson');
+          }
+          return u.toString();
+        } catch {
+          return url.includes('?') ? `${url}&format=geojson` : `${url}?format=geojson`;
+        }
+      };
+
+      const loadEndpoint = async (endpoint: string) => {
+        const layerName = extractLayerName(endpoint);
+        let file: File | null = null;
+        try {
+          const parquetRes = await fetch(endpoint, {headers: {Authorization: `Token ${token}`}});
+          if (!parquetRes.ok) throw new Error(`Failed parquet fetch: ${parquetRes.status}`);
+          const blob = await parquetRes.blob();
+          file = new File([blob], `${layerName}.parquet`, {type: 'application/octet-stream'});
+        } catch {
+          try {
+            const geojsonUrl = buildGeojsonUrl(endpoint);
+            const res = await fetch(geojsonUrl, {headers: {Authorization: `Token ${token}`}});
+            if (!res.ok) {
+              const text = await res.text();
+              throw new Error(text || `Failed geojson fetch: ${res.status}`);
+            }
+            const blob = await res.blob();
+            file = new File([blob], `${layerName}.geojson`, {type: 'application/json'});
+          } catch (fallbackError) {
+            console.error('Failed to load endpoint', endpoint, fallbackError);
+            return;
+          }
+        }
+        if (!file) return;
+        dispatch(
+          loadFiles([file], fileCache => {
+            const payloads = filesToDataPayload(fileCache);
+            payloads.forEach(payload => {
+              dispatch(
+                addDataToMap({
+                  ...payload,
+                  options: {...payload.options, centerMap: true, autoCreateLayers: true}
+                })
+              );
+            });
+            return null;
+          })
+        );
+      };
+
+      for (const ep of endpoints) {
+        // eslint-disable-next-line no-await-in-loop
+        await loadEndpoint(ep);
+      }
+
+      if (mapConfig) {
+        const loaded = KeplerGlSchema.load(undefined, mapConfig);
+        if (loaded?.config) {
+          dispatch(
+            addDataToMap({config: loaded.config, options: {centerMap: true, keepExistingConfig: true}})
+          );
+        }
+      }
+    },
+    [dispatch]
+  );
+
   const saveMap = useCallback(
     async (mapName?: string) => {
       try {
@@ -332,7 +508,7 @@ export const useMapSaveRestore = () => {
     }
   }, [dispatch]);
 
-  return {saveMap, restoreMap};
+  return {saveMap, restoreMap, listMaps, saveMapNew, saveMapOverride, restoreFromRecord};
 };
 
 export default useMapSaveRestore;
