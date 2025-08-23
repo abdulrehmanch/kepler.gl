@@ -39,6 +39,7 @@ type MapWizardTabsProps = {
   onAddSelectedLayers: () => void | Promise<void>;
   onLogout: () => void;
   onClose: () => void;
+  addedLayerNames?: string[]; // normalized or raw names of layers already on the map
 };
 
 export default function MapWizardTabs({
@@ -49,7 +50,8 @@ export default function MapWizardTabs({
   onRefreshLayers,
   onAddSelectedLayers,
   onLogout,
-  onClose
+  onClose,
+  addedLayerNames
 }: MapWizardTabsProps) {
   const {listMaps, saveMapNew, saveMapOverride, restoreFromRecord} = useMapSaveRestore();
 
@@ -100,6 +102,8 @@ export default function MapWizardTabs({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
+
+  const addedSet = useMemo(() => new Set((addedLayerNames || []).map(n => String(n).toLowerCase())), [addedLayerNames]);
 
   return (
     <div style={container}>
@@ -242,31 +246,42 @@ export default function MapWizardTabs({
                   overflowY: 'auto'
                 }}
               >
-                {layers.map((layerName, index) => (
-                  <li
-                    key={`${layerName}-${index}`}
-                    style={{
-                      padding: '5px 0',
-                      borderBottom: index < layers.length - 1 ? '1px solid #eee' : 'none',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center'
-                    }}
-                  >
-                    <div style={{display: 'flex', alignItems: 'center'}}>
-                      <input
-                        type="checkbox"
-                        id={`mw-layer-${index}`}
-                        name={layerName}
-                        value={layerName}
-                        checked={!!selectedLayers[layerName]}
-                        onChange={() => onToggleLayer(layerName)}
-                        style={{marginRight: 8}}
-                      />
-                      <label htmlFor={`mw-layer-${index}`}>{layerName}</label>
-                    </div>
-                  </li>
-                ))}
+                {layers.map((layerName, index) => {
+                  const normalized = String(layerName).toLowerCase();
+                  const alreadyAdded = addedSet.has(normalized);
+                  return (
+                    <li
+                      key={`${layerName}-${index}`}
+                      style={{
+                        padding: '5px 0',
+                        borderBottom: index < layers.length - 1 ? '1px solid #eee' : 'none',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        opacity: alreadyAdded ? 0.6 : 1
+                      }}
+                    >
+                      <div style={{display: 'flex', alignItems: 'center'}}>
+                        <input
+                          type="checkbox"
+                          id={`mw-layer-${index}`}
+                          name={layerName}
+                          value={layerName}
+                          checked={!!selectedLayers[layerName] && !alreadyAdded}
+                          disabled={alreadyAdded}
+                          onChange={() => {
+                            if (!alreadyAdded) onToggleLayer(layerName);
+                          }}
+                          style={{marginRight: 8}}
+                        />
+                        <label htmlFor={`mw-layer-${index}`}>
+                          {layerName}
+                          {alreadyAdded ? ' (already on map)' : ''}
+                        </label>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
               {
                 // Always show the button; disable it if nothing selected or loading

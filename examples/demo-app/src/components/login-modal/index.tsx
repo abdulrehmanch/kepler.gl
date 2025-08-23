@@ -4,7 +4,7 @@
 import React, {useState} from 'react';
 import {css} from 'styled-components';
 import {toggleModal, addDataToMap, loadFiles} from '@kepler.gl/actions';
-import {useDispatch} from 'react-redux';
+import {useDispatch, useSelector} from 'react-redux';
 import {filesToDataPayload} from '@kepler.gl/processors';
 import {baseUrl} from '../../config';
 import MapWizardTabs from './map-wizard-tabs';
@@ -116,6 +116,27 @@ const LoginModal = () => {
   const [selectedLayers, setSelectedLayers] = useState<{[key: string]: boolean}>({});
   const [isLayerLoading, setIsLayerLoading] = useState(false);
 
+  // Existing datasets in kepler.gl (to prevent duplicate loads)
+  const datasetsObj = useSelector(
+    (state: any) => state?.demo?.keplerGl?.map?.visState?.datasets || {}
+  );
+  const existingLayerNameSet = React.useMemo(() => {
+    try {
+      const names = Object.values(datasetsObj)
+        .map((ds: any) => ds?.label || ds?.dataContainer?.props?.label || '')
+        .filter(Boolean)
+        .map((l: any) =>
+          String(l)
+            .replace(/\.(parquet|geojson|json|csv)$/i, '')
+            .toLowerCase()
+        );
+      return new Set<string>(names as string[]);
+    } catch {
+      return new Set<string>();
+    }
+  }, [datasetsObj]);
+  const isAlreadyLoaded = (name: string) => existingLayerNameSet.has(String(name).toLowerCase());
+
   // Helper to normalize user-layers payload to always have datasets: string[]
   const normalizeUserLayers = (
     raw: any
@@ -183,7 +204,6 @@ const LoginModal = () => {
     }
   }, []);
 
-
   // Logout function
   const handleLogout = () => {
     localStorage.removeItem('authToken');
@@ -234,6 +254,12 @@ const LoginModal = () => {
 
   // @ts-ignore
   const handleAddLayer = async (layerName: string) => {
+    // Prevent adding duplicate layers by name (case-insensitive, ignoring file extensions)
+    if (isAlreadyLoaded(layerName)) {
+      // @ts-ignore
+      alert(`Layer "${layerName}" is already added to the map.`);
+      return;
+    }
     const layerUrl = `${baseUrl}/be/api/serve-layer/?layer_name=${layerName}`;
 
     // Set the loading state to true before starting the fetch
@@ -372,29 +398,31 @@ const LoginModal = () => {
           <h3 style={{textAlign: 'center', marginBottom: '10px', fontSize: '16px'}}>Welcome</h3>
           <p style={{marginBottom: '10px', fontSize: '14px'}}>You are logged in successfully.</p>
           <MapWizardTabs
-                      layers={userLayers && userLayers[0] && userLayers[0].datasets ? userLayers[0].datasets : []}
-                      isLayerLoading={isLayerLoading}
-                      selectedLayers={selectedLayers}
-                      onToggleLayer={(name: string) =>
-                        setSelectedLayers(prev => ({...prev, [name]: !prev[name]}))
-                      }
-                      onRefreshLayers={() => {
-                        const token = localStorage.getItem('authToken');
-                        if (token) {
-                          fetchUserLayers(token, true);
-                        }
-                      }}
-                      onAddSelectedLayers={async () => {
-                        const layersToAdd = Object.keys(selectedLayers).filter(k => selectedLayers[k]);
-                        for (const name of layersToAdd) {
-                          // eslint-disable-next-line no-await-in-loop
-                          await handleAddLayer(name);
-                        }
-                      }}
-                      onLogout={handleLogout}
-                      onClose={() => dispatch(toggleModal(null))}
-                    />
-
+            layers={
+              userLayers && userLayers[0] && userLayers[0].datasets ? userLayers[0].datasets : []
+            }
+            isLayerLoading={isLayerLoading}
+            selectedLayers={selectedLayers}
+            onToggleLayer={(name: string) =>
+              setSelectedLayers(prev => ({...prev, [name]: !prev[name]}))
+            }
+            onRefreshLayers={() => {
+              const token = localStorage.getItem('authToken');
+              if (token) {
+                fetchUserLayers(token, true);
+              }
+            }}
+            onAddSelectedLayers={async () => {
+              const layersToAdd = Object.keys(selectedLayers).filter(k => selectedLayers[k]);
+              for (const name of layersToAdd) {
+                // eslint-disable-next-line no-await-in-loop
+                await handleAddLayer(name);
+              }
+            }}
+            onLogout={handleLogout}
+            onClose={() => dispatch(toggleModal(null))}
+            addedLayerNames={Array.from(existingLayerNameSet)}
+          />
         </div>
       ) : (
         // Not logged in state - show login form

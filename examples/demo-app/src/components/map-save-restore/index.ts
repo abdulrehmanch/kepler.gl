@@ -78,7 +78,9 @@ export const useMapSaveRestore = () => {
       }
       try {
         localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({config}));
-      } catch {}
+      } catch {
+        /* empty */
+      }
     },
     [buildConfigAndEndpoints]
   );
@@ -103,7 +105,9 @@ export const useMapSaveRestore = () => {
       }
       try {
         localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({config}));
-      } catch {}
+      } catch {
+        /* empty */
+      }
     },
     [buildConfigAndEndpoints]
   );
@@ -144,13 +148,38 @@ export const useMapSaveRestore = () => {
 
       const loadEndpoint = async (endpoint: string) => {
         const layerName = extractLayerName(endpoint);
+        // Prevent duplicate loading if dataset with same normalized name already exists
+        const existingSet = new Set(
+          Object.values(mapState?.visState?.datasets || {})
+            .map((ds: any) => ds?.label || ds?.dataContainer?.props?.label || '')
+            .filter(Boolean)
+            .map((l: any) =>
+              String(l)
+                .replace(/\.(parquet|geojson|json|csv)$/i, '')
+                .toLowerCase()
+            ) as string[]
+        );
+        if (existingSet.has(String(layerName).toLowerCase())) {
+          return;
+        }
         let file: File | null = null;
         try {
-          const parquetRes = await fetch(endpoint, {headers: {Authorization: `Token ${token}`}});
-          if (!parquetRes.ok) throw new Error(`Failed parquet fetch: ${parquetRes.status}`);
-          const blob = await parquetRes.blob();
-          file = new File([blob], `${layerName}.parquet`, {type: 'application/octet-stream'});
-        } catch {
+          // Fetch once to inspect Content-Type
+          const res = await fetch(endpoint, {headers: {Authorization: `Token ${token}`}});
+          if (!res.ok) throw new Error(`Failed fetch: ${res.status}`);
+          const contentType = res.headers.get('Content-Type') || '';
+          const looksParquet = contentType.includes('application/octet-stream');
+          if (looksParquet) {
+            const blob = await res.blob();
+            file = new File([blob], `${layerName}.parquet`, {type: 'application/octet-stream'});
+          } else {
+            // Treat as GeoJSON/JSON
+            const json = await res.json();
+            const blob = new Blob([JSON.stringify(json)], {type: 'application/json'});
+            file = new File([blob], `${layerName}.geojson`, {type: 'application/json'});
+          }
+        } catch (err) {
+          // Final fallback: explicitly request geojson
           try {
             const geojsonUrl = buildGeojsonUrl(endpoint);
             const res = await fetch(geojsonUrl, {headers: {Authorization: `Token ${token}`}});
@@ -158,7 +187,8 @@ export const useMapSaveRestore = () => {
               const text = await res.text();
               throw new Error(text || `Failed geojson fetch: ${res.status}`);
             }
-            const blob = await res.blob();
+            const json = await res.json();
+            const blob = new Blob([JSON.stringify(json)], {type: 'application/json'});
             file = new File([blob], `${layerName}.geojson`, {type: 'application/json'});
           } catch (fallbackError) {
             console.error('Failed to load endpoint', endpoint, fallbackError);
@@ -191,7 +221,10 @@ export const useMapSaveRestore = () => {
         const loaded = KeplerGlSchema.load(undefined, mapConfig);
         if (loaded?.config) {
           dispatch(
-            addDataToMap({config: loaded.config, options: {centerMap: true, keepExistingConfig: true}})
+            addDataToMap({
+              config: loaded.config,
+              options: {centerMap: true, keepExistingConfig: true}
+            })
           );
         }
       }
@@ -259,7 +292,9 @@ export const useMapSaveRestore = () => {
           });
           if (!listRes.ok) {
             const text = await listRes.text();
-            throw new Error(text || `Failed to fetch maps: ${listRes.status} ${listRes.statusText}`);
+            throw new Error(
+              text || `Failed to fetch maps: ${listRes.status} ${listRes.statusText}`
+            );
           }
           const maps = await listRes.json();
           if (!Array.isArray(maps) || maps.length === 0) {
@@ -268,10 +303,15 @@ export const useMapSaveRestore = () => {
             const listStr = maps
               .map(
                 (m: any, i: number) =>
-                  `${i + 1}. ${m?.map_name || m?.name || 'Untitled'} (${Array.isArray(m?.endpoints) ? m.endpoints.length : 0} layers)`
+                  `${i + 1}. ${m?.map_name || m?.name || 'Untitled'} (${
+                    Array.isArray(m?.endpoints) ? m.endpoints.length : 0
+                  } layers)`
               )
               .join('\n');
-            const sel = window.prompt(`Select a map to OVERRIDE by number:\n${listStr}\nEnter number:`, '1');
+            const sel = window.prompt(
+              `Select a map to OVERRIDE by number:\n${listStr}\nEnter number:`,
+              '1'
+            );
             if (sel) {
               const idx = Number.parseInt(sel, 10) - 1;
               if (!Number.isNaN(idx) && idx >= 0 && idx < maps.length) {
@@ -280,7 +320,9 @@ export const useMapSaveRestore = () => {
                 if (selectedId === undefined || selectedId === null) {
                   alert('Selected map has no identifiable id. Saving as a new map instead.');
                 } else {
-                  const putUrl = `${baseUrl}/be/api/maps/${encodeURIComponent(String(selectedId))}/`;
+                  const putUrl = `${baseUrl}/be/api/maps/${encodeURIComponent(
+                    String(selectedId)
+                  )}/`;
                   res = await fetch(putUrl, {
                     method: 'PUT',
                     headers: {
@@ -424,19 +466,42 @@ export const useMapSaveRestore = () => {
       // Helper to load a single endpoint
       const loadEndpoint = async (endpoint: string) => {
         const layerName = extractLayerName(endpoint);
+        // Prevent duplicate loading if dataset with same normalized name already exists
+        const existingSet = new Set(
+          Object.values(mapState?.visState?.datasets || {})
+            .map((ds: any) => ds?.label || ds?.dataContainer?.props?.label || '')
+            .filter(Boolean)
+            .map((l: any) =>
+              String(l)
+                .replace(/\.(parquet|geojson|json|csv)$/i, '')
+                .toLowerCase()
+            ) as string[]
+        );
+        if (existingSet.has(String(layerName).toLowerCase())) {
+          return;
+        }
         let file: File | null = null;
         try {
-          // Try parquet first
-          const parquetRes = await fetch(endpoint, {
+          // Fetch once to inspect Content-Type
+          const res = await fetch(endpoint, {
             headers: {
               Authorization: `Token ${token}`
             }
           });
-          if (!parquetRes.ok) {
-            throw new Error(`Failed parquet fetch: ${parquetRes.status}`);
+          if (!res.ok) {
+            throw new Error(`Failed fetch: ${res.status}`);
           }
-          const blob = await parquetRes.blob();
-          file = new File([blob], `${layerName}.parquet`, {type: 'application/octet-stream'});
+          const contentType = res.headers.get('Content-Type') || '';
+          const looksParquet = contentType.includes('application/octet-stream');
+
+          if (looksParquet) {
+            const blob = await res.blob();
+            file = new File([blob], `${layerName}.parquet`, {type: 'application/octet-stream'});
+          } else {
+            const json = await res.json();
+            const blob = new Blob([JSON.stringify(json)], {type: 'application/json'});
+            file = new File([blob], `${layerName}.geojson`, {type: 'application/json'});
+          }
         } catch (processingError) {
           // Fallback to GeoJSON
           try {
@@ -450,7 +515,8 @@ export const useMapSaveRestore = () => {
               const text = await res.text();
               throw new Error(text || `Failed geojson fetch: ${res.status}`);
             }
-            const blob = await res.blob();
+            const json = await res.json();
+            const blob = new Blob([JSON.stringify(json)], {type: 'application/json'});
             file = new File([blob], `${layerName}.geojson`, {type: 'application/json'});
           } catch (fallbackError) {
             console.error('Failed to load endpoint', endpoint, fallbackError);
